@@ -1,70 +1,44 @@
 import express from "express";
-import helmet from "helmet";
-import cors from "cors";
-import rateLimit from "express-rate-limit";
-import xss from "xss-clean";
-import hpp from "hpp";
+import { createServer as createHttpsServer } from "https";
+import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { createServer } from "https";
-import { readFileSync } from "fs";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const app = express();
+const dist = join(__dirname, process.env.STATIC_DIR || "dist");
 
-// Security Headers
-app.use(helmet());
+app.use(express.static(dist));
 
-// CORS Configuration
-app.use(
-  cors({
-    origin:
-      process.env.NODE_ENV === "production"
-        ? "https://yourdomain.com"
-        : "http://localhost:3000",
-    methods: ["GET", "POST"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true,
-  })
-);
-
-// Rate Limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-});
-app.use(limiter);
-
-// Data Sanitization against XSS
-app.use(xss());
-
-// Prevent HTTP Parameter Pollution
-app.use(hpp());
-
-// Serve static files from the dist directory
-app.use(express.static(join(__dirname, "dist")));
-
-// All other routes should serve the index.html
 app.get("*", (req, res) => {
-  res.sendFile(join(__dirname, "dist", "index.html"));
+  res.sendFile(join(dist, "index.html"));
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
-if (process.env.NODE_ENV === "production") {
-  // SSL configuration for HTTPS
-  const httpsOptions = {
-    key: readFileSync("/path/to/key.pem"),
-    cert: readFileSync("/path/to/cert.pem"),
-  };
+const keyPath =
+  typeof process.env.SSL_KEY_PATH === "string" ? process.env.SSL_KEY_PATH.trim() : "";
+const certPath =
+  typeof process.env.SSL_CERT_PATH === "string" ? process.env.SSL_CERT_PATH.trim() : "";
 
-  createServer(httpsOptions, app).listen(PORT, () => {
-    console.log(`Secure server running on port ${PORT}`);
-  });
+if (keyPath && certPath) {
+  try {
+    const opts = {
+      key: readFileSync(keyPath),
+      cert: readFileSync(certPath),
+    };
+    createHttpsServer(opts, app).listen(PORT, () => {
+      console.log(`HTTPS listening on port ${PORT}`);
+    });
+  } catch (e) {
+    console.error("HTTPS failed to start, falling back to HTTP:", e.message);
+    app.listen(PORT, () => {
+      console.log(`HTTP listening on port ${PORT}`);
+    });
+  }
 } else {
   app.listen(PORT, () => {
-    console.log(`Development server running on port ${PORT}`);
+    console.log(`HTTP listening on port ${PORT}`);
   });
 }
